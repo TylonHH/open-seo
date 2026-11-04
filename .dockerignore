@@ -1,0 +1,16 @@
+.git
+node_modules
+**/node_modules
+.env
+.env.*
+!.env.example
+.dev.vars
+.wrangler
+.localflare
+.everyapp
+.alchemy
+dist
+.output
+.cache
+.logs
+web/dist
