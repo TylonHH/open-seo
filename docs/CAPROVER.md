@@ -1,6 +1,9 @@
 # CapRover (single-container compatibility edition)
 
 This fork reuses upstream's `deploy/docker/Dockerfile` without application changes.
+It enables `CLOUDFLARE_INCLUDE_PROCESS_ENV=true` so the preview worker receives
+container environment variables, including authentication and provider secrets.
+The Dockerfile-specific ignore file excludes local credentials from builds.
 It is the legacy Wrangler-based edition, not the newer celld standalone stack.
 The standalone stack needs S3, initialization, a crawl gateway and nginx.
 

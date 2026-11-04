@@ -11,3 +11,11 @@
 .env.*
 !.env.example
 .alchemy/
+.dev.vars
+.dev.vars.*
+**/.dev.vars
+**/.dev.vars.*
+**/.env
+**/.env.*
+.everyapp
+.localflare
