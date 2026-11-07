@@ -61,7 +61,7 @@ const allowed = [
 config.vars = {
   ...secrets,
   BETTER_AUTH_URL: url.origin,
-  CRAWL_GATEWAY_URL: "http://crawl-gateway:8090",
+  CRAWL_GATEWAY_URL: process.env.CRAWL_GATEWAY_URL || "http://crawl-gateway:8090",
   AUTH_MODE: authMode,
   DATABASE_PROVIDER: "d1",
   OPENSEO_TELEMETRY_DISABLED: "true",

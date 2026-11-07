@@ -1,57 +1,60 @@
-# CapRover (single-container compatibility edition)
+# CapRover
 
-This fork reuses upstream's `deploy/docker/Dockerfile` without application changes.
-It enables `CLOUDFLARE_INCLUDE_PROCESS_ENV=true` so the preview worker receives
-container environment variables, including authentication and provider secrets.
-The Dockerfile-specific ignore file excludes local credentials from builds.
-It is the legacy Wrangler-based edition, not the newer celld standalone stack.
-The standalone stack needs S3, initialization, a crawl gateway and nginx.
+CapRover runs Swarm services, not Compose files, so the upstream standalone
+stack (`deploy/standalone/compose.yaml`) is deployed as several CapRover apps on
+the `captain-overlay-network`. Service discovery uses CapRover's
+`srv-captain--<app>` names instead of Compose service names.
 
 ## Images
 
-The publish-container workflow publishes `ghcr.io/tylonhh/open-seo` on pushes to
-`main`, `v*` tags, and manual dispatch. Tags: `latest` on the default branch,
-`sha-<full commit SHA>`, and the exact `v*` tag. It verifies the pushed manifest
-and records its digest in the run summary. Builds never deploy or synchronize
-upstream automatically. Only `linux/amd64` is built; confirm NAS architecture.
+`.github/workflows/publish-container.yml` publishes two linux/amd64 images on
+every push to `main` and on `v*` tags, tagged `latest`, `sha-<commit>` and the tag:
 
-GHCR packages can initially be private. Make the package public for anonymous
-pulls, or configure CapRover registry credentials with `read:packages` access.
-Builds use `GITHUB_TOKEN`; no personal token needed. Prefer immutable digest
-references such as `ghcr.io/tylonhh/open-seo@sha256:...` for deployment.
+- `ghcr.io/tylonhh/open-seo-standalone` from `deploy/standalone/Dockerfile`
+  (current celld runtime; use this)
+- `ghcr.io/tylonhh/open-seo` from `deploy/docker/Dockerfile`
+  (legacy Wrangler/Miniflare single container; kept only for rollback)
 
-## CapRover settings
+Pin deployments to the digest printed in the workflow summary.
 
-- Container HTTP port `3001`; one instance, persistent data enabled.
-- Persistent directory `/app/.wrangler`: database and local worker state.
-  Back up before upgrades; migrations run automatically on startup.
-- Required: `PORT=3001`, `AUTH_MODE=password`,
-  `BETTER_AUTH_URL=https://<your-domain>`, stable random `BETTER_AUTH_SECRET`
-  with at least 32 characters.
-- Recommended: `VITE_SHOW_DEVTOOLS=false`, `OPENSEO_TELEMETRY_DISABLED=1`.
-- Enable HTTPS. Restrict access until the first administrator is created:
-  the first visitor claims it; later accounts require invitations.
+## Fork adaptations (kept minimal)
 
-Use CapRover's image deployment field only after target approval.
-`captain-definition` also supports source builds using the upstream Dockerfile.
-Do not publish host port 3001 or mount the Docker socket.
+- `deploy/standalone/init.sh`: `OPENSEO_RUNTIME_HOST` (default `runtime`)
+  rewrites the nginx upstream when writing `/web-config/default.conf`.
+- `scripts/celld/runtime/configure.mjs`: `CRAWL_GATEWAY_URL` env overrides the
+  default `http://crawl-gateway:8090`.
 
-This image installs dependencies at build time but compiles Vite at first boot
-and after build-relevant environment changes. Allow several minutes and adequate
-RAM; upstream health checks allow 300 seconds. This is not a fully precompiled
-production runtime. Upstream runs as root inside the container. `/api/health`
-is public. Never expose `AUTH_MODE=local_noauth` without separate authentication
-or a private network.
+Everything else is upstream as-is.
 
-## External services
+## Apps
 
-`DATAFORSEO_API_KEY`: base64 of `email:password` for paid DataForSEO features.
-`OPENROUTER_API_KEY`: paid AI features; optional `OPENROUTER_BASE_URL` and
-`OPENROUTER_MODEL`. Google Search Console and Analytics need `GOOGLE_CLIENT_ID`,
-`GOOGLE_CLIENT_SECRET`, consent configuration and the stable auth secret; see
-upstream Google self-hosting guides for redirect URIs. Optional `CONTEXT_API_KEY`
-enables JavaScript-rendered site audits. No Cloudflare account, external database
-or S3 service is required for this compatibility edition. Missing provider keys
-disable related features. Anonymous telemetry is enabled unless disabled.
+| CapRover app | Image | Command | Volumes |
+| --- | --- | --- | --- |
+| `open-seo-storage` | `rustfs/rustfs:1.0.3@sha256:9ca955...` | default | `open-seo-storage:/data` |
+| `open-seo-runtime` | open-seo-standalone | default (`run.sh`) | `open-seo-runtime:/data`, `open-seo-config:/config` |
+| `open-seo-crawl-gateway` | open-seo-standalone | `node /opt/standalone/crawl-gateway.mjs` | `open-seo-config:/config` |
+| `open-seo` (public URL, HTTPS, Basic auth) | `nginx:1.28-alpine` | default | `open-seo-web-config:/etc/nginx/conf.d` |
 
-No deployment yet: NAS versus Netcup remains pending.
+Environment for `open-seo-runtime` follows `compose.yaml` with
+`S3_ENDPOINT=http://srv-captain--open-seo-storage:9000`.
+
+## Init
+
+`init.sh` must reach the runtime's internal listener `127.0.0.1:8081`
+(`network_mode: service:runtime` in Compose). On CapRover run it once as a
+one-shot container that joins the runtime task's network namespace:
+
+```sh
+docker run --rm --network container:$(docker ps -q -f name=srv-captain--open-seo-runtime) \
+  -v open-seo-config:/config -v open-seo-web-config:/web-config \
+  -e OPENSEO_RUNTIME_HOST=srv-captain--open-seo-runtime \
+  -e CRAWL_GATEWAY_URL=http://srv-captain--open-seo-crawl-gateway:8090 \
+  --env-file /root/open-seo/init.env \
+  ghcr.io/tylonhh/open-seo-standalone@sha256:... sh /opt/standalone/init.sh
+```
+
+`init.env` holds the `x-storage` variables, `AUTH_MODE`, `BETTER_AUTH_URL` and
+optional provider keys (root-only file). Re-run after every image update
+(deploy + migrations). The legacy import (`scripts/celld/migrate-legacy.mjs`)
+runs the same way from the `build` stage image with the old volume mounted
+read-only at `/legacy`.

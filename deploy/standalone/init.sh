@@ -12,7 +12,10 @@ EMPTY_SHA256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
 node /opt/standalone/configure.mjs
 # Nginx's site config ships in this image, so the Compose file needs no files
 # beside it (platforms such as Coolify and Portainer take the file alone).
-install -m 0644 /opt/standalone/nginx.conf /web-config/default.conf
+# OPENSEO_RUNTIME_HOST lets platforms without Compose service names (CapRover:
+# srv-captain--<app>) point Nginx at the runtime; the default matches compose.yaml.
+sed "s|http://runtime:8080|http://${OPENSEO_RUNTIME_HOST:-runtime}:8080|" /opt/standalone/nginx.conf > /tmp/default.conf
+install -m 0644 /tmp/default.conf /web-config/default.conf
 ready=0
 for attempt in $(seq 1 90); do
   if curl -fsS --aws-sigv4 "aws:amz:${AWS_REGION}:s3" --user "$AWS_ACCESS_KEY_ID:$AWS_SECRET_ACCESS_KEY" -H "x-amz-content-sha256: $EMPTY_SHA256" -I "$S3_ENDPOINT/$CELLD_BUCKET" >/dev/null 2>&1; then ready=1; break; fi
